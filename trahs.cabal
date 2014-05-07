@@ -13,7 +13,8 @@ extra-source-files:
 library
   hs-source-dirs: src
   exposed-modules:
-    Trahs
+    FileUtils
+    , Trahs
   build-depends:
     base < 5
    ,bytestring
