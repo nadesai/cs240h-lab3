@@ -10,7 +10,7 @@ import System.Random (randomIO)
 import System.Posix.Types (EpochTime, FileOffset) 
 import System.PosixCompat.Files (getSymbolicLinkStatus, isRegularFile, fileSize, modificationTime, FileStatus)
 import System.Directory (getDirectoryContents)
-import System.IO (openFile, hGetContents, IOMode(..))
+import System.IO (openFile, hGetContents, hPutStr, hPutStrLn, hClose, stderr, readFile, IOMode(..))
 import qualified Data.Map.Strict as S
 import qualified Data.ByteString.Lazy as L
 
@@ -27,25 +27,40 @@ type VersionVector = S.Map ReplicaID VersionID
 type FileHash = String
 type FileSize = FileOffset
 type FileModTime = EpochTime
+type DBModTime = EpochTime
 
-data WriteStamp = WriteStamp { rid :: ReplicaID, vid :: VersionID } deriving (Read, Show)
-data FileInfo = FileInfo { fsize :: FileSize, fmodtime :: FileModTime } deriving (Read, Show)
-data FileStruct = FileStruct { wstamp :: WriteStamp, finfo :: FileInfo} deriving (Read, Show)
+data WriteStamp = WriteStamp { rid :: ReplicaID, vid :: VersionID } deriving (Eq, Read, Show)
+data FileInfo = FileInfo { fsize :: FileSize, fmodtime :: FileModTime } deriving (Eq, Read, Show)
+data FileStruct = FileStruct { wstamp :: WriteStamp, finfo :: FileInfo} deriving (Eq, Read, Show)
 
 type FileInfoMap = S.Map FilePath FileInfo
-type FileMap = S.Map FilePath FileStruct
+type FileStructMap = S.Map FilePath FileStruct
 
-data TraDatabase = TraDatabase { dbid :: ReplicaID, dbmap :: FileMap, dbvv :: VersionVector} deriving (Read, Show)
+data TraDatabase = TraDatabase { dbid :: ReplicaID, dbmap :: FileStructMap, dbvv :: VersionVector} deriving (Eq, Read, Show)
+
 
 -- Code for obtaining the existing database representing the current directory.
+updateDB :: FilePath -> IO ()
+updateDB dir = do
+  oldDB <- getOldDB dir
+  newInfo <- getDirectoryInfo dir 
+  let newDB = updateDatabase newInfo oldDB
+  writeNewDB dir newDB
 
 -- Given a directory path, looks for a trahs database and returns 
-getDB :: FilePath -> IO TraDatabase
-getDB dir = do
+getOldDB :: FilePath -> IO TraDatabase
+getOldDB dir = do
   contents <- getFileContents (dir </> dbFileName) 
   let readDB (Nothing) = getNewEmptyDB
       readDB (Just s)  = return (deserialize s) 
   readDB contents
+
+writeNewDB :: FilePath -> TraDatabase -> IO ()
+writeNewDB dir db = do
+  handle <- openFile (dir </> dbFileName) WriteMode
+  hPutStr handle $ serialize db
+  hPutStrLn stderr $ serialize db
+  hClose handle
 
 -- Given a directory path, generates a database.
 getNewEmptyDB :: IO TraDatabase
@@ -69,10 +84,8 @@ serialize = show
 getFileContents :: FilePath -> IO (Maybe String)
 getFileContents fp = getExistingDB fp `catch` returnNothing where
            getExistingDB :: FilePath -> IO (Maybe String) 
-           getExistingDB fp' = do
-                              handle <- openFile fp' ReadMode
-                              contents <- hGetContents handle
-                              return (Just contents)
+           getExistingDB fp' = do contents <- readFile fp' 
+                                  return $ (length contents `seq` Just contents)
            returnNothing :: IOError -> IO (Maybe String)
            returnNothing _ = return Nothing
 
@@ -80,10 +93,10 @@ getFileContents fp = getExistingDB fp `catch` returnNothing where
 
 -- Gets a map of file path to modification info for a given directory.
 getDirectoryInfo :: FilePath -> IO FileInfoMap
-getDirectoryInfo fp = do paths <- getDirectoryFilePaths fp 
-                         stats <- getDirectoryStatuses paths
-                         let fileinfo = getRegularFileInfo stats
-                         return $ S.fromList fileinfo
+getDirectoryInfo dir = do paths <- getDirectoryFilePaths dir 
+                          stats <- getDirectoryStatuses paths
+                          let fileinfo = getRegularFileInfo stats
+                          return $ S.fromList fileinfo
 
 -- Gets full paths for all the components of a directory other than the database file.
 getDirectoryFilePaths :: FilePath -> IO [FilePath]
@@ -110,13 +123,35 @@ getFileInfo :: FileStatus -> FileInfo
 getFileInfo fs = FileInfo { fsize = fileSize fs, fmodtime = modificationTime fs }
 
 
+-- Logic for updating the current version of the database given the old version and the current
+-- FileInfoMap.
+updateDatabase :: FileInfoMap -> TraDatabase -> TraDatabase
+updateDatabase newmap old = TraDatabase { dbid = oldID, dbvv = newVV, dbmap = newMap } where
+                            newMap = updateMap oldID newVersion newmap oldMap
+                            newVV = S.adjust (const newVersion) oldID oldVV
+                            newVersion = (oldVV S.! oldID) + 1
+                            oldID = dbid old
+                            oldVV = dbvv old
+                            oldMap = dbmap old
+
+-- Updates the writestamps to the latest version. O(n log n) for now.
+updateMap :: ReplicaID -> VersionID -> FileInfoMap -> FileStructMap -> FileStructMap
+updateMap r v newmap oldmap = S.mapWithKey (\k i -> getWriteStamp (S.lookup k oldmap) r v i) newmap
+
+-- Logic for manipulating the file structure and 
+-- Logic for computing writestamp of file.
+getWriteStamp :: Maybe FileStruct -> ReplicaID -> VersionID -> FileInfo -> FileStruct
+getWriteStamp (Nothing) r v info = FileStruct { wstamp = WriteStamp { rid = r, vid = v }, finfo = info }
+getWriteStamp (Just fs) r v info 
+  | (finfo fs) == info = fs
+  | otherwise          = FileStruct { wstamp = WriteStamp { rid = r, vid = v }, finfo = info }
 
 --- Unnecessary (for now) utility functions
--- Computes the files present in an old FileMap that were not present in the current directory.
-deletedFiles :: FileMap -> [FilePath] -> [FilePath]
+-- Computes the files present in an old FileStructMap that were not present in the current directory.
+deletedFiles :: FileStructMap -> [FilePath] -> [FilePath]
 deletedFiles fm fps = (S.keys fm) \\ fps
 
-createdFiles :: FileMap -> [FilePath] -> [FilePath]
+createdFiles :: FileStructMap -> [FilePath] -> [FilePath]
 createdFiles fm fps = fps \\ (S.keys fm)
 
 -- Hashes the given file (may not be necessary)
