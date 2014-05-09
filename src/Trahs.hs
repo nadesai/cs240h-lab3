@@ -1,6 +1,6 @@
 module Trahs (trahs) where
 
-import FileActions (getDirectoryStatuses)
+import FileActions (getNewEmptyDB)
 
 import Control.Applicative
 import System.Environment
@@ -39,8 +39,8 @@ client _ r w dir = do
   line' <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line'
 
-  files <- getDirectoryStatuses dir
-  hPutStrLn stderr $ "The directory listing is:" ++ (show files)
+  struct <- getNewEmptyDB
+  hPutStrLn stderr $ "The directory listing is:" ++ (show struct)
   -- At the end, if turn == True, then we issue some command to swap
   -- roles and run server r w dir.
 

@@ -30,45 +30,32 @@ type FileModTime = EpochTime
 
 data WriteStamp = WriteStamp { rid :: ReplicaID, vid :: VersionID } deriving (Read, Show)
 data FileInfo = FileInfo { fsize :: FileSize, fmodtime :: FileModTime } deriving (Read, Show)
-type FileMap = S.Map FilePath (WriteStamp,FileInfo)
+data FileStruct = FileStruct { wstamp :: WriteStamp, finfo :: FileInfo} deriving (Read, Show)
+
+type FileInfoMap = S.Map FilePath FileInfo
+type FileMap = S.Map FilePath FileStruct
 
 data TraDatabase = TraDatabase { dbid :: ReplicaID, dbmap :: FileMap, dbvv :: VersionVector} deriving (Read, Show)
 
+-- Code for obtaining the existing database representing the current directory.
+
+-- Given a directory path, looks for a trahs database and returns 
+getDB :: FilePath -> IO TraDatabase
+getDB dir = do
+  contents <- getFileContents (dir </> dbFileName) 
+  let readDB (Nothing) = getNewEmptyDB
+      readDB (Just s)  = return (deserialize s) 
+  readDB contents
+
 -- Given a directory path, generates a database.
-genDB :: FilePath -> IO TraDatabase
-genDB = undefined
+getNewEmptyDB :: IO TraDatabase
+getNewEmptyDB = do uuid <- genRandomUUID
+                   let singleVV = [(uuid,0)]
+                   return TraDatabase { dbid = uuid, dbmap = S.empty, dbvv = S.fromList singleVV } 
 
--- Given a directory path, reads in the existing database if one exists.
--- Returns nothing otherwise. 
-getDBContents :: FilePath -> IO (Maybe String)
-getDBContents fp = getExistingDB fp `catch` returnNothing where
-           getExistingDB :: FilePath -> IO (Maybe String) 
-           getExistingDB fp' = do
-                              handle <- openFile (fp' </> dbFileName) ReadMode
-                              contents <- hGetContents handle
-                              return (Just contents)
-           returnNothing :: IOError -> IO (Maybe String)
-           returnNothing _ = return Nothing
-
--- Gets full paths for all the components of a directory other than the files.
-getDirectoryFilePaths :: FilePath -> IO [FilePath]
-getDirectoryFilePaths fp = do 
-  files' <- getDirectoryContents fp
-  let files = filter (/= dbFileName) $ files'
-  return (map (fp </>) files)
-
--- Gets the paths for and statuses of the various files within a directory. These are REGULAR files
--- only, ignoring the database.
-getDirectoryStatuses :: FilePath -> IO [(FilePath,FileInfo)]
-getDirectoryStatuses fp = do
-  paths <- getDirectoryFilePaths fp
-  stats <- sequence (map getSymbolicLinkStatus paths)
-  let regularFiles = filter (isRegularFile . snd) (zip paths stats)
-  return (map (\(a,b) -> (a,getFileInfo b)) regularFiles)
-
--- Given a FileStatus struct, returns a corresponding FileInfo struct
-getFileInfo :: FileStatus -> FileInfo
-getFileInfo fs = FileInfo { fsize = fileSize fs, fmodtime = modificationTime fs }
+-- Generates a random UUID 
+genRandomUUID :: IO ReplicaID
+genRandomUUID = randomIO
 
 -- Serialize-deserialize code for TraDatabase.
 deserialize :: String -> TraDatabase
@@ -77,10 +64,54 @@ deserialize = read
 serialize :: TraDatabase -> String
 serialize = show
 
--- Generates a random UUID 
-genRandomUUID :: IO ReplicaID
-genRandomUUID = randomIO
+-- Given a directory path, reads the existing file if one exists.
+-- Returns nothing otherwise. 
+getFileContents :: FilePath -> IO (Maybe String)
+getFileContents fp = getExistingDB fp `catch` returnNothing where
+           getExistingDB :: FilePath -> IO (Maybe String) 
+           getExistingDB fp' = do
+                              handle <- openFile fp' ReadMode
+                              contents <- hGetContents handle
+                              return (Just contents)
+           returnNothing :: IOError -> IO (Maybe String)
+           returnNothing _ = return Nothing
 
+-- Code for reading information from the directory.
+
+-- Gets a map of file path to modification info for a given directory.
+getDirectoryInfo :: FilePath -> IO FileInfoMap
+getDirectoryInfo fp = do paths <- getDirectoryFilePaths fp 
+                         stats <- getDirectoryStatuses paths
+                         let fileinfo = getRegularFileInfo stats
+                         return $ S.fromList fileinfo
+
+-- Gets full paths for all the components of a directory other than the database file.
+getDirectoryFilePaths :: FilePath -> IO [FilePath]
+getDirectoryFilePaths fp = do 
+  files <- getDirectoryContents fp
+  -- let files = filter (/= dbFileName) $ files'
+  return $ map (fp </>) files
+
+-- Gets the paths for and statuses of the various files. These are REGULAR files
+-- only, ignoring the database.
+getDirectoryStatuses :: [FilePath] -> IO [(FilePath,FileStatus)]
+getDirectoryStatuses paths = do
+  stats <- sequence (map getSymbolicLinkStatus paths)
+  return $ zip paths stats
+
+-- Given a map of file paths to file status structs, filters out everything but ordinary files,
+-- filters out the database file, and turns FileStatus into FileInfo.
+getRegularFileInfo :: [(FilePath,FileStatus)] -> [(FilePath,FileInfo)]
+getRegularFileInfo = map toInfoTuple . filter ((/= dbFileName) . fst) . filter (isRegularFile . snd) 
+                     where toInfoTuple (a,b) = (a,getFileInfo b)
+
+-- Given a FileStatus struct, returns a corresponding FileInfo struct
+getFileInfo :: FileStatus -> FileInfo
+getFileInfo fs = FileInfo { fsize = fileSize fs, fmodtime = modificationTime fs }
+
+
+
+--- Unnecessary (for now) utility functions
 -- Computes the files present in an old FileMap that were not present in the current directory.
 deletedFiles :: FileMap -> [FilePath] -> [FilePath]
 deletedFiles fm fps = (S.keys fm) \\ fps
