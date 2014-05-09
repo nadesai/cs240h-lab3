@@ -1,6 +1,7 @@
 module Trahs (trahs) where
 
 import FileActions (updateDB)
+import Diff (mergeVectors)
 
 import Control.Applicative
 import System.Directory

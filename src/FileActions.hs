@@ -1,38 +1,18 @@
 module FileActions where
 
+import Types
+
 import Control.Applicative
 import Control.Exception (catch)
 import Codec.Digest.SHA
-import Data.Word (Word64)
 import Data.List ((\\))
 import System.FilePath ((</>))
 import System.Random (randomIO) 
-import System.Posix.Types (EpochTime, FileOffset) 
 import System.PosixCompat.Files (getSymbolicLinkStatus, isRegularFile, fileSize, modificationTime, FileStatus)
 import System.Directory (getDirectoryContents)
-import System.IO (openFile, hPutStr, hPutStrLn, hClose, stderr, IOMode(..))
+import System.IO (openFile, hPutStrLn, hClose, IOMode(..))
 import qualified Data.Map.Strict as S
 import qualified Data.ByteString.Lazy as L
-
-type FileName = FilePath
-type DirectoryName = FilePath
-type ReplicaID = Word64 
-type VersionID = Integer
-type VersionVector = S.Map ReplicaID VersionID
-
-type FileHash = String
-type FileSize = FileOffset
-type FileModTime = EpochTime
-type DBModTime = EpochTime
-
-data WriteStamp = WriteStamp { rid :: ReplicaID, vid :: VersionID } deriving (Eq, Read, Show)
-data FileInfo = FileInfo { fsize :: FileSize, fmodtime :: FileModTime } deriving (Eq, Read, Show)
-data FileStruct = FileStruct { wstamp :: WriteStamp, finfo :: FileInfo} deriving (Eq, Read, Show)
-
-type FileInfoMap = S.Map FileName FileInfo
-type FileStructMap = S.Map FileName FileStruct
-
-data TraDatabase = TraDatabase { dbid :: ReplicaID, dbmap :: FileStructMap, dbvv :: VersionVector} deriving (Eq, Read, Show)
 
 dbFileName :: FileName
 dbFileName = ".trahs.db"
@@ -59,15 +39,14 @@ getOldDB dir = do
 writeNewDB :: DirectoryName -> TraDatabase -> IO ()
 writeNewDB dir db = do
   handle <- openFile (dir </> dbFileName) WriteMode
-  hPutStr handle $ serialize db
-  hPutStrLn stderr $ serialize db
+  hPutStrLn handle $ serialize db
+  -- hPutStrLn stderr $ serialize db
   hClose handle
 
 -- Given a directory path, generates a database.
 getNewEmptyDB :: IO TraDatabase
 getNewEmptyDB = do uuid <- genRandomUUID
-                   let singleVV = [(uuid,0)]
-                   return TraDatabase { dbid = uuid, dbmap = S.empty, dbvv = S.fromList singleVV } 
+                   return TraDatabase { dbid = uuid, dbmap = S.empty, dbvv = S.singleton uuid 0 } 
 
 -- Generates a random UUID 
 genRandomUUID :: IO ReplicaID
