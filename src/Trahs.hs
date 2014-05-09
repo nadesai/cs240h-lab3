@@ -1,7 +1,6 @@
 module Trahs (trahs) where
 
 import FileActions (getDirectoryStatuses)
-import FileUtils ()
 
 import Control.Applicative
 import System.Environment
