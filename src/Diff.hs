@@ -2,13 +2,15 @@ module Diff where
 
 import Types
 
+import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as S
 
 data Action = NoChange | Download | Conflict | Delete deriving (Show)
+type Diff = S.Map FileName Action
 
 -- Computes the diff between two TraDatabases 
-diff :: TraDatabase -> TraDatabase -> Map FileName Action
+diff :: TraDatabase -> TraDatabase -> Diff
 diff local remote = S.unions [getDeletionActions vvs localFiles, getAdditionActions vvs remoteFiles, getMergeActions vvs mergedFiles] where
   localFiles = localMap S.\\ remoteMap
   remoteFiles = remoteMap S.\\ localMap
@@ -52,7 +54,7 @@ fileVersion = vid . wstamp
 -- verison vector.
 -- Useful for figuring out if a machine has "seen" this file before.
 vectorVersion :: VersionVector -> FileStruct -> VersionID
-vectorVersion vector file = vector S.! (rid (wstamp file))
+vectorVersion vector file = fromMaybe 0 $ S.lookup (rid $ wstamp file) vector
 
 -- Merging vectors. 
 mergeVectors :: VersionVector -> VersionVector -> VersionVector

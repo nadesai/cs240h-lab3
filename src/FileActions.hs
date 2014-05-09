@@ -21,12 +21,13 @@ dbTempFileName :: FileName
 dbTempFileName = ".trahs.db~"
 
 -- Code for obtaining the existing database representing the current directory.
-updateDB :: DirectoryName -> IO ()
+updateDB :: DirectoryName -> IO TraDatabase
 updateDB dir = do
   oldDB <- getOldDB dir
   newInfo <- getDirectoryInfo dir 
   let newDB = updateDatabase newInfo oldDB
   writeNewDB dir newDB
+  return newDB
 
 -- Given a directory path, looks for a trahs database and returns 
 getOldDB :: DirectoryName -> IO TraDatabase
