@@ -2,6 +2,7 @@ module Main where
 
 import Test.Hspec
 import Test.QuickCheck
+
 import Trahs
 
 main :: IO ()
@@ -21,4 +22,3 @@ main = hspec $ describe "Testing Lab 3" $ do
   describe "serialize" $ do
     it "is inverse to show" $ property $
       \x -> (read . show) x == (x :: Int)
-

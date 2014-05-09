@@ -1,6 +1,8 @@
 module Trahs (trahs) where
 
-import FileUtils
+import FileActions (getDirectoryStatuses)
+import FileUtils ()
+
 import Control.Applicative
 import System.Environment
 import System.Exit
@@ -15,7 +17,7 @@ trassh = "ssh -CTaxq @ ./trahs --server"
 -- | @server r w dir@ runs the code to serve the contents of @dir@,
 -- reading input from @r@ and writing it to @w@.
 server :: Handle -> Handle -> FilePath -> IO ()
-server r w dir = do
+server r w _ = do
   hPutStrLn w "I am the server"
   line <- hGetLine r
   -- If the command asked us to switch roles, then at this point we
@@ -31,12 +33,15 @@ server r w dir = do
 -- Otherwise, if @turn@ is false, @client@ should simply return when
 -- done.
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
-client turn r w dir = do
+client _ r w dir = do
   line <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line
   hPutStrLn w "Hello, server"
   line' <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line'
+
+  files <- getDirectoryStatuses dir
+  hPutStrLn stderr $ "The directory listing is:" ++ (show files)
   -- At the end, if turn == True, then we issue some command to swap
   -- roles and run server r w dir.
 
